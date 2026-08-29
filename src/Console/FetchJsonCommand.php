@@ -56,29 +56,22 @@ class FetchJsonCommand extends Command
 				continue;
 			}
 
-			// 4. Skapa den nya forumtråden (Discussion)
 			$discussion = Discussion::start($title, $actor);
-			
-			// Valfritt: Koppla tråden till en specifik tagg (ID 1 i detta exempel)
-			// Kräver att flarum/tags är aktiverat
 			$discussion->raise(new \Flarum\Tags\Event\DiscussionWillBeTagged($discussion, $actor, [3]));
 
 			$discussion->save();
 
-			// 5. Skapa det första inlägget i tråden (Post)
-			// Vi lägger till vår dolda kommentar i slutet av brödtexten för dubblettkontrollen
 			$fullContent = $content . "\n\n" . $duplicateIdentifier;
 			
 			$post = CommentPost::reply(
 				$discussion->id,
 				$fullContent,
 				$actor->id,
-				'127.0.0.1' // IP-adress för systeminlägget
+				'127.0.0.1'
 			);
 
 			$post->save();
 
-			// Uppdatera diskussionens metadata (antal inlägg, senaste postare etc.)
 			$discussion->refreshCommentCount();
 			$discussion->refreshLastPost();
 			$discussion->save();
