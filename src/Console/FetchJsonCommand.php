@@ -40,12 +40,7 @@ class FetchJsonCommand extends Command
 			return;
 		}
 		
-		$createdCount = 0;
 		foreach ($items as $item) {
-			if ($createdCount >= 1) {
-				break;
-			}
-
 			$externalId = Arr::get($item, 'linkid');
 			$title = Arr::get($item, 'name');
 			$rawContent = Arr::get($item, 'description');
@@ -90,8 +85,6 @@ class FetchJsonCommand extends Command
 				$discussion->save();
 
 				$this->info("Klart! Skapade tråd för ID {$externalId}.");
-				$createdCount++;
-
 			} catch (\Throwable $dbError) {
 				$this->error("Kraschade vid skapande av tråd: " . $dbError->getMessage());
 				return;
