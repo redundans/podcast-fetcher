@@ -1,6 +1,5 @@
 <?php
 
-namespace Acme\JsonPosts\Console;
 namespace redundans\PodcastFetcher\Console;
 
 use Flarum\Discussion\Discussion;
@@ -8,7 +7,6 @@ use Flarum\Post\CommentPost;
 use Flarum\User\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Str;
 use GuzzleHttp\Client;
 
 class FetchJsonCommand extends Command
@@ -32,7 +30,7 @@ class FetchJsonCommand extends Command
 		try {
 			$response = $client->get($jsonUrl);
 			$items = json_decode($response->getBody()->getContents(), true);
-		} catch (\Exception $e) {
+		} catch (\Throwable $e) {
 			$this->error('Kunde inte hämta JSON-filen: ' . $e->getMessage());
 			return;
 		}
@@ -41,13 +39,19 @@ class FetchJsonCommand extends Command
 			$this->info('Inga objekt hittades i JSON-filen.');
 			return;
 		}
-
+		
+		$createdCount = 0;
 		foreach ($items as $item) {
-			$externalId = Arr::get($item, 'id');
-			$title = Arr::get($item, 'title');
-			$content = Arr::get($item, 'content');
+			if ($createdCount >= 1) {
+				break;
+			}
 
-			$duplicateIdentifier = "<!-- json_id: $externalId -->";
+			$externalId = Arr::get($item, 'linkid');
+			$title = Arr::get($item, 'name');
+			$rawContent = Arr::get($item, 'description');
+			$content = html_entity_decode($rawContent, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+			$duplicateIdentifier = "sync_source_id: " . $externalId;
 
 			$exists = CommentPost::where('content', 'LIKE', "%{$duplicateIdentifier}%")->exists();
 
@@ -55,28 +59,43 @@ class FetchJsonCommand extends Command
 				$this->line("Objektet med ID {$externalId} finns redan. Hoppar över.");
 				continue;
 			}
-
-			$discussion = Discussion::start($title, $actor);
-			$discussion->raise(new \Flarum\Tags\Event\DiscussionWillBeTagged($discussion, $actor, [3]));
-
-			$discussion->save();
-
-			$fullContent = $content . "\n\n" . $duplicateIdentifier;
 			
-			$post = CommentPost::reply(
-				$discussion->id,
-				$fullContent,
-				$actor->id,
-				'127.0.0.1'
-			);
+			try {
+				$this->info("Hittade nytt avsnitt. Skapar tråd: \"{$title}\"...");
 
-			$post->save();
+				$discussion = Discussion::start($title, $actor);
+				$discussion->save();
+				
+				if (method_exists($discussion, 'tags')) {
+					$discussion->tags()->sync([3]);
+				}
 
-			$discussion->refreshCommentCount();
-			$discussion->refreshLastPost();
-			$discussion->save();
+				$content = strip_tags($content);
+				$fullContent = $content . "\n\n" . $duplicateIdentifier;
+				
+				$post = new CommentPost();
+				$post->discussion_id = $discussion->id;
+				
+				$formatter = $this->laravel->make('flarum.formatter');
+				$post->content = $formatter->parse($fullContent, $post);
+				
+				$post->user_id       = $actor->id;
+				$post->ip_address    = '127.0.0.1';
+				$post->created_at    = \Carbon\Carbon::now();
+				$post->type          = 'comment';
+				$post->save();
 
-			$this->info("Skapade ny tråd: \"{$title}\"");
+				$discussion->refreshCommentCount();
+				$discussion->refreshLastPost();
+				$discussion->save();
+
+				$this->info("Klart! Skapade tråd för ID {$externalId}.");
+				$createdCount++;
+
+			} catch (\Throwable $dbError) {
+				$this->error("Kraschade vid skapande av tråd: " . $dbError->getMessage());
+				return;
+			}
 		}
 
 		$this->info('JSON-synkronisering slutförd!');
