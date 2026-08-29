@@ -5,15 +5,26 @@ namespace redundans\PodcastFetcher\Console;
 use Flarum\Discussion\Discussion;
 use Flarum\Post\CommentPost;
 use Flarum\User\User;
+use Flarum\Tags\Tag;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
+use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use GuzzleHttp\Client;
+use Intervention\Image\ImageManager;
+use Intervention\Image\Drivers\Gd\Driver as GdDriver;
 
 class FetchJsonCommand extends Command
 {
 	protected $signature = 'noden:fetch-episodes';
 	protected $description = 'Hämtar objekt från JSON-fil och skapar forumtrådar.';
+	protected $assetsDisk;
 
+	public function __construct(FilesystemFactory $filesystem)
+	{
+		parent::__construct();
+		$this->assetsDisk = $filesystem->disk('flarum-assets');
+	}
+	
 	public function handle()
 	{
 		$this->info('Startar hämtning av JSON...');
@@ -44,11 +55,14 @@ class FetchJsonCommand extends Command
 			$externalId = Arr::get($item, 'linkid');
 			$title = Arr::get($item, 'name');
 			$rawContent = Arr::get($item, 'description');
+			$pod = Arr::get($item, 'pod');
+			$image_url = $pod['icon'];
+			$linkposter_url = Arr::get($item, 'url');
 			$content = html_entity_decode($rawContent, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
 			$duplicateIdentifier = "sync_source_id: " . $externalId;
 
-			$exists = CommentPost::where('content', 'LIKE', "%{$duplicateIdentifier}%")->exists();
+			$exists = Discussion::where('linkposter_url', $linkposter_url)->exists();
 
 			if ($exists) {
 				$this->line("Objektet med ID {$externalId} finns redan. Hoppar över.");
@@ -60,31 +74,83 @@ class FetchJsonCommand extends Command
 
 				$discussion = Discussion::start($title, $actor);
 				$discussion->save();
-				
-				if (method_exists($discussion, 'tags')) {
-					$discussion->tags()->sync([3]);
-				}
 
 				$content = strip_tags($content);
-				$fullContent = $content . "\n\n" . $duplicateIdentifier;
 				
 				$post = new CommentPost();
 				$post->discussion_id = $discussion->id;
 				
-				$formatter = $this->laravel->make('flarum.formatter');
-				$post->content = $formatter->parse($fullContent, $post);
-				
+				$post->content       = '';
 				$post->user_id       = $actor->id;
 				$post->ip_address    = '127.0.0.1';
 				$post->created_at    = \Carbon\Carbon::now();
 				$post->type          = 'comment';
 				$post->save();
+				
+				$discussion->linkposter_description = $content;
+				$discussion->linkposter_url = Arr::get($item, 'url');
+				
+				if ($image_url) {
+					$clean_name = basename(parse_url($image_url, PHP_URL_PATH));
+					$filename = time() . '_' . (preg_replace('/[^a-zA-Z0-9_.-]/', '', $clean_name) ?: 'thumb.jpg');
+				
+					try {
+						$client = new Client(['timeout' => 5.0]);
+						$response = $client->get($image_url);
+						$image_content = $response->getBody()->getContents();
+						$manager = new ImageManager(new GdDriver());
+						$image = $manager->read($image_content);
+						$thumbnail = $image->cover(150, 150);
+						$thumbnail_encoded = $thumbnail->encode(new \Intervention\Image\Encoders\JpegEncoder(75))->toString();
+										
+						if ($discussion->linkposter_thumbnail && $this->assetsDisk->has("linkposter/{$discussion->linkposter_thumbnail}")) {
+							$this->assetsDisk->delete("linkposter/{$discussion->linkposter_thumbnail}");
+						}
+				
+						$this->assetsDisk->put("linkposter/{$filename}", $thumbnail_encoded);
+						$discussion->linkposter_thumbnail = $filename;
+					} catch (\Exception $e) {
+						resolve('log')->error('Linkposter downloading of thumbnail did not succeed: ' . $e->getMessage());
+						if (!$discussion->exists) {
+							$discussion->linkposter_thumbnail = null;
+						}
+					}
+				} else if (!$discussion->exists) {
+					$discussion->linkposter_thumbnail = null;
+				}
 
 				$discussion->refreshCommentCount();
 				$discussion->refreshLastPost();
 				$discussion->save();
 
+				try {
+					$db = app('flarum.db');
+					
+					$tagId = $db->table('tags')
+						->where('slug', 'poddar')
+						->value('id');
+				
+					if ($tagId) {
+						$db->table('discussion_tag')
+							->where('discussion_id', $discussion->id)
+							->delete();
+				
+						$db->table('discussion_tag')->insert([
+							'discussion_id' => $discussion->id,
+							'tag_id'        => $tagId
+						]);
+				
+						$this->info("Kopplade tråden till taggen (ID: {$tagId}) direkt i databasen.");
+					} else {
+						$this->error("Kunde inte hitta någon tagg med sluggen 'poddar' i databasen.");
+					}
+				} catch (\Throwable $tagError) {
+					$this->warn("Kunde inte synka tagg via databasen: " . $tagError->getMessage());
+				}
+
+
 				$this->info("Klart! Skapade tråd för ID {$externalId}.");
+				die();
 			} catch (\Throwable $dbError) {
 				$this->error("Kraschade vid skapande av tråd: " . $dbError->getMessage());
 				return;
