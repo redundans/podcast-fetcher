@@ -132,7 +132,7 @@ class FetchJsonCommand extends Command
 					$db = app('flarum.db');
 
 					$tagId = $db->table('tags')
-						->where('slug', 'poddar')
+						->where('slug', 'podcasts')
 						->value('id');
 
 					if ($tagId) {
