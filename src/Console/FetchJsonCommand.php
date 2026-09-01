@@ -114,7 +114,7 @@ class FetchJsonCommand extends Command
 						$this->assetsDisk->put("linkposter/{$filename}", $thumbnail_encoded);
 						$discussion->linkposter_thumbnail = $filename;
 					} catch (\Exception $e) {
-						resolve('log')->error('Linkposter downloading of thumbnail did not succeed: ' . $e->getMessage());
+                        $this->error("Kunde inte ladda ned tumnagel: " . $tagError->getMessage());
 						if (!$discussion->exists) {
 							$discussion->linkposter_thumbnail = null;
 						}
