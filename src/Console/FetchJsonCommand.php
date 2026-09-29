@@ -30,10 +30,10 @@ class FetchJsonCommand extends Command
 		$this->info('Startar hämtning av JSON...');
 
 		$jsonUrl = 'https://app.radionoden.se/app/episodes.json';
-		$actor = User::find(23);
+		$actor = User::find(1);
 
 		if (!$actor) {
-			$this->error('Kunde inte hitta användaren med ID 1.');
+			$this->error('Kunde inte hitta användaren med ID 23.');
 			return;
 		}
 
@@ -57,7 +57,8 @@ class FetchJsonCommand extends Command
 			$rawContent = Arr::get($item, 'description');
 			$pod = Arr::get($item, 'pod');
 			$image_url = $pod['icon'];
-			$linkposter_url = Arr::get($item, 'url');
+            $linkposter_url = 'https://www.radionoden.se/podcasts/' . Arr::get($pod, 'id') . '/episode/' . Arr::get($item, 'linkid');
+			# $linkposter_url = Arr::get($item, 'url');
 			$content = html_entity_decode($rawContent, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
             $publishedString = Arr::get($item, 'published');
@@ -77,7 +78,7 @@ class FetchJsonCommand extends Command
 
 				$discussion = Discussion::start($title, $actor);
                 $discussion->linkposter_description = $content;
-                $discussion->linkposter_url = Arr::get($item, 'url');
+                $discussion->linkposter_url = 'https://www.radionoden.se/podcasts/' . Arr::get($pod, 'id') . '/episode/' . Arr::get($item, 'linkid');
                 $discussion->created_at = $publishedDate;
 				$discussion->save();
 
