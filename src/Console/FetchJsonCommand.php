@@ -30,7 +30,7 @@ class FetchJsonCommand extends Command
 		$this->info('Startar hämtning av JSON...');
 
 		$jsonUrl = 'https://app.radionoden.se/app/episodes.json';
-		$actor = User::find(1);
+		$actor = User::find(23);
 
 		if (!$actor) {
 			$this->error('Kunde inte hitta användaren med ID 23.');
